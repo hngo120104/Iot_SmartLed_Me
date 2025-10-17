@@ -1,21 +1,28 @@
-package com.example.be;
+package com.example.be.controller;
 
 import com.example.be.dto.DataSentReceived;
 import com.example.be.model.TurnOnLED;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.microsoft.recognizers.text.ModelResult;
+import com.microsoft.recognizers.text.datetime.DateTimeRecognizer;
 import jakarta.annotation.PostConstruct;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.client.RestTemplate;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Map;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @RestController
 @RequestMapping("/")
-@CrossOrigin(origins = "http://localhost:5173")
+@CrossOrigin(origins = "*")
 public class GGController {
     private DataSentReceived data;
     //các câu lệnh thường xuyên để đổi màu
@@ -24,9 +31,12 @@ public class GGController {
     private HashMap<String, String> colors;
     //Khởi tạo đèn
     private TurnOnLED turnLED;
+    //khởi tạo mảng lưu ca thoiwf gian báo thức
+    private TreeSet<Long> arrTime;
     //hàm khởi tạo
     @PostConstruct
     public void init() {
+        arrTime = new TreeSet<>();
         data = new DataSentReceived();
         turnLED=new TurnOnLED();
         data.setObj(turnLED);
@@ -84,6 +94,8 @@ public class GGController {
         colors.put("nâu vàng", "210,180,140");       // Tan
         colors.put("xanh lục nhạt", "152,251,152");  // Pale Green
         colors.put("xanh lơ nhạt", "176,224,230");
+        //Khởi tạo luồng để báo thức
+        new Thread(()->setAlarm()).start();
     }
     @PostMapping("/received")
     public ResponseEntity<String> receive(@RequestParam("file") String message) {
@@ -91,7 +103,7 @@ public class GGController {
         return ResponseEntity.ok("received");
     }
     @PostMapping("/received/text")
-    public ResponseEntity<?> receiveText(@RequestBody Map<String, String> body) {
+    public ResponseEntity<?> receiveText(@RequestBody Map<String, String> body){
         String text = body.get("text");
         if(text.contains("bật đèn")){
 
@@ -117,6 +129,16 @@ public class GGController {
                 }
             }
             data.setType("bật đèn");
+        }
+        if(text.contains("bật đèn")||text.contains("báo thức")){
+            String en=translateViToEn(text);
+            System.out.println(en);
+            LocalDateTime time=getTime(en);
+            System.out.println(time);
+            if(time!=null&&time.isAfter(LocalDateTime.now())){
+                long millis = time.toInstant(ZoneOffset.UTC).toEpochMilli();
+                arrTime.add(Math.round((double)millis/1000));
+            }
         }
         if(text.contains("tắt đèn")){
             data.setType("tắt đèn");
@@ -156,5 +178,71 @@ public class GGController {
     @PostMapping("/data")
     public ResponseEntity<?> sentData() {
         return ResponseEntity.ok(data);
+    }
+    public String translateViToEn(String vietnameseText) {
+        try {
+            // 1. Encode input để đưa vào URL
+            String encodedText = vietnameseText.replaceAll(" ","+");
+            String url = String.format("https://api.mymemory.translated.net/get?q=%s&langpair=vi|en", encodedText);
+
+            // 2. Gọi API
+            RestTemplate restTemplate = new RestTemplate();
+            String response = restTemplate.getForObject(url, String.class);
+
+            // 3. Parse JSON trả về
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode root = mapper.readTree(response);
+            String encodedTranslated = root.path("responseData").path("translatedText").asText();
+            String translatedText = URLDecoder.decode(encodedTranslated, StandardCharsets.UTF_8.toString());
+
+            return translatedText;
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+    public LocalDateTime getTime(String s){
+        List<ModelResult> results = DateTimeRecognizer.recognizeDateTime(s, "en-us");
+
+        if (!results.isEmpty()) {
+            ModelResult r = results.get(0);
+
+            // resolution là Map<String, Object>
+            Map<String, Object> resolution = r.resolution;
+            List<Map<String, String>> values = (List<Map<String, String>>) resolution.get("values");
+            System.out.println(values.get(0));
+            String valueStr = values.get(0).get("value");  // ví dụ "2025-10-17 09:00:00"
+            System.out.println(valueStr);
+            // chuyển sang LocalDateTime
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+            LocalDateTime dateTime = LocalDateTime.parse(valueStr, formatter);
+            return dateTime;
+        }
+        return null;
+    }
+    @GetMapping("/get-time-now")
+    public ResponseEntity<String> getTimeNow(){
+        LocalDateTime now = LocalDateTime.now();
+        long millis = now.toInstant(ZoneOffset.UTC).toEpochMilli();
+        return ResponseEntity.ok(millis+"");
+    }
+    public void setAlarm(){
+        while(true) {
+            LocalDateTime now = LocalDateTime.now();
+            long millis = now.toInstant(ZoneOffset.UTC).toEpochMilli();
+            long seconds = Math.round((double) millis / 1000);
+            if (arrTime.contains(seconds)) {
+                data.setType("bật đèn");
+                arrTime.remove(seconds);
+            }
+            // Xóa tất cả phần tử nhỏ hơn seconds
+            arrTime.headSet(seconds).clear();
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }
     }
 }
