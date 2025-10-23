@@ -6,7 +6,7 @@ export default function SentText(){
     const sent=async(e)=>{
         e.preventDefault();
         try{
-            const res= await axios.post("http://localhost:8080/received/text",{text});
+            const res= await axios.post("http://172.11.242.94:8080/received/text",{text});
             console.log(res.data);
             //setReceivedText(res.data);
         }

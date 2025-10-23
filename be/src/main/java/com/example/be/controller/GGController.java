@@ -104,7 +104,7 @@ public class GGController {
     }
     @PostMapping("/received/text")
     public ResponseEntity<?> receiveText(@RequestBody Map<String, String> body){
-        String text = body.get("text");
+        String text = body.get("text").toLowerCase();
         if(text.contains("bật đèn")){
 
             // Regex lấy số sau "mức sáng"
@@ -130,7 +130,7 @@ public class GGController {
             }
             data.setType("bật đèn");
         }
-        if(text.contains("bật đèn")||text.contains("báo thức")){
+        if(text.contains("báo thức")){
             String en=translateViToEn(text);
             System.out.println(en);
             LocalDateTime time=getTime(en);
@@ -139,6 +139,12 @@ public class GGController {
                 long millis = time.toInstant(ZoneOffset.UTC).toEpochMilli();
                 arrTime.add(Math.round((double)millis/1000));
             }
+        }
+        if(text.equals("bật chế độ tự động")){
+            data.setType("tự động");
+        }
+        if(text.equals("tắt chế độ tự động")){
+            data.setType("tắt đèn");
         }
         if(text.contains("tắt đèn")){
             data.setType("tắt đèn");
